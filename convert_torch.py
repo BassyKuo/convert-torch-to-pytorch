@@ -54,9 +54,15 @@ def lua_recursive_model(module,seq):
     for m in module.modules:
         name = type(m).__name__
         real = m
+        #print ("Name:", name)
+        #print ("-- m:", m)
         if name == 'TorchObject':
             name = m._typename.replace('cudnn.','')
             m = m._obj
+            #print ("[TorchObject] Name:", name)
+            #print ("[TorchObject] -- m:", m)
+            #print ("[TorchObject] -- m.running_mean:", m.running_mean)
+            #print ("[TorchObject] -- m.affine:", m.affine)
 
         if name == 'SpatialConvolution' or name == 'nn.SpatialConvolutionMM':
             if not hasattr(m,'groups') or m.groups is None: m.groups=1
@@ -71,11 +77,18 @@ def lua_recursive_model(module,seq):
             n = nn.BatchNorm3d(m.running_mean.size(0), m.eps, m.momentum, m.affine)
             copy_param(m, n)
             add_submodule(seq, n)
+        elif name == 'InstanceNormalization' or name == 'nn.InstanceNormalization':
+            n = nn.InstanceNorm2d(m.running_mean.size(0), m.eps, m.momentum, m.affine, track_running_stats=True)
+            copy_param(m, n)
+            add_submodule(seq, n)
         elif name == 'ReLU':
             n = nn.ReLU()
             add_submodule(seq,n)
         elif name == 'Sigmoid':
             n = nn.Sigmoid()
+            add_submodule(seq,n)
+        elif name == 'Tanh':
+            n = nn.Tanh()
             add_submodule(seq,n)
         elif name == 'SpatialMaxPooling':
             n = nn.MaxPool2d((m.kW,m.kH),(m.dW,m.dH),(m.padW,m.padH),ceil_mode=m.ceil_mode)
@@ -160,6 +173,8 @@ def lua_recursive_source(module):
     for m in module.modules:
         name = type(m).__name__
         real = m
+        #print ("[Source] Name:", name)
+        #print ("[Source] -- m:", m)
         if name == 'TorchObject':
             name = m._typename.replace('cudnn.','')
             m = m._obj
@@ -172,10 +187,14 @@ def lua_recursive_source(module):
             s += ['nn.BatchNorm2d({},{},{},{}),#BatchNorm2d'.format(m.running_mean.size(0), m.eps, m.momentum, m.affine)]
         elif name == 'VolumetricBatchNormalization':
             s += ['nn.BatchNorm3d({},{},{},{}),#BatchNorm3d'.format(m.running_mean.size(0), m.eps, m.momentum, m.affine)]
+        elif name == 'nn.InstanceNormalization':
+            s += ['nn.InstanceNorm2d({},{},{},{},True),#InstanceNorm2d'.format(m.running_mean.size(0), m.eps, m.momentum, m.affine)]
         elif name == 'ReLU':
             s += ['nn.ReLU()']
         elif name == 'Sigmoid':
             s += ['nn.Sigmoid()']
+        elif name == 'Tanh':
+            s += ['nn.Tanh()']
         elif name == 'SpatialMaxPooling':
             s += ['nn.MaxPool2d({},{},{},ceil_mode={}),#MaxPool2d'.format((m.kW,m.kH),(m.dW,m.dH),(m.padW,m.padH),m.ceil_mode)]
         elif name == 'SpatialAveragePooling':
@@ -306,9 +325,9 @@ class LambdaReduce(LambdaBase):
 
 parser = argparse.ArgumentParser(description='Convert torch t7 model to pytorch')
 parser.add_argument('--model','-m', type=str, required=True,
-                    help='torch model file in t7 format')
+                    help='torch model file in t7 format [%(default)s]')
 parser.add_argument('--output', '-o', type=str, default=None,
-                    help='output file name prefix, xxx.py xxx.pth')
+                    help='output file name prefix, xxx.py xxx.pth [%(default)s]')
 args = parser.parse_args()
 
 torch_to_pytorch(args.model,args.output)
